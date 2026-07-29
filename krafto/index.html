@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pack Semicircles Optimizer - Parallel Tempering MCMC Swarm</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #08080c;
+            color: #d0d0e0;
+            font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            min-height: 100vh;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #12121a;
+            border: 1px solid #2a2a3a;
+            padding: 12px 20px;
+            border-radius: 8px;
+        }
+        h1 {
+            font-size: 1.2rem;
+            color: #00ffcc;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: #222233;
+            color: #aaa;
+            border: 1px solid #333344;
+        }
+        .status-badge.active {
+            background: #004433;
+            color: #00ffcc;
+            border-color: #00ffcc;
+        }
+        .metrics-bar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        .metric {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+        .metric-label {
+            font-size: 0.65rem;
+            color: #777788;
+            text-transform: uppercase;
+        }
+        .metric-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ffffff;
+        }
+        .metric-value.best {
+            color: #00ffcc;
+            text-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
+        }
+        .controls-bar {
+            display: flex;
+            gap: 10px;
+            background: #12121a;
+            border: 1px solid #2a2a3a;
+            padding: 10px;
+            border-radius: 8px;
+            flex-wrap: wrap;
+        }
+        button {
+            background: #1a1a26;
+            color: #00ffcc;
+            border: 1px solid #00ffcc;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #00ffcc;
+            color: #08080c;
+            box-shadow: 0 0 12px rgba(0, 255, 204, 0.4);
+        }
+        button.danger {
+            color: #ff3366;
+            border-color: #ff3366;
+        }
+        button.danger:hover {
+            background: #ff3366;
+            color: #08080c;
+            box-shadow: 0 0 12px rgba(255, 51, 102, 0.4);
+        }
+        main {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 15px;
+            flex: 1;
+        }
+        .canvas-container {
+            background: #12121a;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            padding: 10px;
+        }
+        canvas#mainCanvas {
+            background: #0d0d14;
+            border-radius: 6px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .swarm-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .sidebar-title {
+            font-size: 0.8rem;
+            color: #777788;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #2a2a3a;
+        }
+        .swarm-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            background: #12121a;
+            border: 1px solid #2a2a3a;
+            padding: 8px;
+            border-radius: 8px;
+        }
+        .worker-card {
+            background: #0a0a0f;
+            border: 1px solid #222233;
+            border-radius: 4px;
+            padding: 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+        .worker-card.best-worker {
+            border-color: #00ffcc;
+            box-shadow: 0 0 8px rgba(0, 255, 204, 0.2);
+        }
+        .worker-label {
+            font-size: 0.55rem;
+            color: #666677;
+        }
+        .worker-canvas {
+            width: 65px;
+            height: 65px;
+            background: #050508;
+            border-radius: 3px;
+        }
+        .worker-stat {
+            font-size: 0.55rem;
+            color: #aaa;
+        }
+        .terminal-panel {
+            background: #12121a;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 0.75rem;
+            height: 140px;
+            overflow-y: auto;
+            color: #00ffcc;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .log-entry {
+            line-height: 1.3;
+        }
+        .log-entry.warn { color: #ffaa00; }
+        .log-entry.best { color: #00ffcc; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>
+            <span>PACK SEMICIRCLES OPTIMIZER</span>
+            <span id="statusBadge" class="status-badge">SWARM IDLE</span>
+        </h1>
+        <div class="metrics-bar">
+            <div class="metric">
+                <span class="metric-label">Baseline Radius</span>
+                <span class="metric-value">3.500000</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Best Score (Radius)</span>
+                <span id="bestRadius" class="metric-value best">3.500000</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Overlaps</span>
+                <span id="overlapStatus" class="metric-value" style="color: #00ffcc;">0</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="controls-bar">
+        <button id="btnToggle">START SWARM (16 WORKERS)</button>
+        <button id="btnRandom">RANDOM RESTART</button>
+        <button id="btnReset" class="danger">RESET BASELINE</button>
+        <button id="btnExport">EXPORT JSON</button>
+        <button id="btnImport">IMPORT JSON</button>
+    </div>
+
+    <main>
+        <div class="canvas-container">
+            <canvas id="mainCanvas" width="550" height="550"></canvas>
+        </div>
+
+        <div class="swarm-sidebar">
+            <div class="sidebar-title">PARALLEL TEMPERING SWARM (16 WORKERS)</div>
+            <div class="swarm-grid" id="swarmGrid">
+                <!-- 16 worker canvases generated dynamically -->
+            </div>
+        </div>
+    </main>
+
+    <div class="terminal-panel" id="logTerminal">
+        <div class="log-entry">[SYSTEM] Pack Semicircles Optimizer initialized. Ready to start 16-worker parallel MCMC swarm.</div>
+    </div>
+
+    <script>
+        // --- WORKER CODE AS BLOB ---
+        const workerCode = `
+            const NUM_SC = 15;
+            const SUBDIV = 16; // 16 arc segments + 1 flat edge = 17 segments per semicircle
+
+            function sin_deg(deg) { return Math.sin(deg * Math.PI / 180); }
+            function cos_deg(deg) { return Math.cos(deg * Math.PI / 180); }
+
+            // Get 18 boundary vertices of a semicircle
+            function getPolygon(sc) {
+                const verts = [];
+                // Center
+                verts.push({ x: sc.x, y: sc.y });
+                // Flat edge endpoints and arc
+                for (let i = 0; i <= SUBDIV; i++) {
+                    const angle_rad = sc.theta + (-Math.PI/2 + (i / SUBDIV) * Math.PI);
+                    verts.push({
+                        x: sc.x + Math.cos(angle_rad),
+                        y: sc.y + Math.sin(angle_rad)
+                    });
+                }
+                return verts;
+            }
+
+            // Check segment-segment intersection
+            function segmentIntersection(p1, p2, p3, p4) {
+                const d = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+                if (Math.abs(d) < 1e-9) return false;
+                const ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / d;
+                const ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / d;
+                return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
+            }
+
+            // Check if point is strictly inside semicircle
+            function pointInSemicircle(p, sc) {
+                const dx = p.x - sc.x;
+                const dy = p.y - sc.y;
+                const dist2 = dx * dx + dy * dy;
+                if (dist2 >= 0.9999) return false; // Margin for touching boundary
+                const dot = dx * Math.cos(sc.theta) + dy * Math.sin(sc.theta);
+                return dot > 0.0001;
+            }
+
+            // Compute total overlap penalty between two semicircles
+            function computeOverlap(sc1, sc2) {
+                const dx = sc1.x - sc2.x;
+                const dy = sc1.y - sc2.y;
+                const dist2 = dx * dx + dy * dy;
+                if (dist2 >= 4.0) return 0; // Centers too far
+
+                const poly1 = getPolygon(sc1);
+                const poly2 = getPolygon(sc2);
+                let penalty = 0;
+
+                // Check vertex containment
+                for (let i = 1; i < poly1.length; i++) {
+                    if (pointInSemicircle(poly1[i], sc2)) penalty += 1.0;
+                }
+                for (let i = 1; i < poly2.length; i++) {
+                    if (pointInSemicircle(poly2[i], sc1)) penalty += 1.0;
+                }
+
+                // Check segment intersections
+                for (let i = 0; i < poly1.length; i++) {
+                    const p1 = poly1[i];
+                    const p2 = poly1[(i + 1) % poly1.length];
+                    for (let j = 0; j < poly2.length; j++) {
+                        const p3 = poly2[j];
+                        const p4 = poly2[(j + 1) % poly2.length];
+                        if (segmentIntersection(p1, p2, p3, p4)) {
+                            penalty += 0.5;
+                        }
+                    }
+                }
+
+                return penalty;
+            }
+
+            // Welzl's algorithm for Minimum Enclosing Circle of boundary points
+            function getBoundaryPoints(state) {
+                const pts = [];
+                for (let i = 0; i < NUM_SC; i++) {
+                    const poly = getPolygon(state[i]);
+                    for (let j = 1; j < poly.length; j++) {
+                        pts.push(poly[j]);
+                    }
+                }
+                return pts;
+            }
+
+            function computeMEC(state) {
+                const pts = getBoundaryPoints(state);
+                // Simple fast min-max coordinate descent for MEC center
+                let cx = 0, cy = 0;
+                for (let p of pts) { cx += p.x; cy += p.y; }
+                cx /= pts.length; cy /= pts.length;
+
+                let step = 0.5;
+                while (step > 0.00001) {
+                    let best_cx = cx, best_cy = cy, best_max_d2 = 1e9;
+                    const dirs = [[0,0], [0,1], [0,-1], [1,0], [-1,0]];
+                    for (let [dx, dy] of dirs) {
+                        const tcX = cx + dx * step;
+                        const tcY = cy + dy * step;
+                        let max_d2 = 0;
+                        for (let p of pts) {
+                            const d2 = (p.x - tcX)**2 + (p.y - tcY)**2;
+                            if (d2 > max_d2) max_d2 = d2;
+                        }
+                        if (max_d2 < best_max_d2) {
+                            best_max_d2 = max_d2;
+                            best_cx = tcX;
+                            best_cy = tcY;
+                        }
+                    }
+                    if (best_cx === cx && best_cy === cy) step /= 2;
+                    else { cx = best_cx; cy = best_cy; }
+                }
+
+                let max_d2 = 0;
+                for (let p of pts) {
+                    const d2 = (p.x - cx)**2 + (p.y - cy)**2;
+                    if (d2 > max_d2) max_d2 = d2;
+                }
+                return { cx, cy, radius: Math.sqrt(max_d2) };
+            }
+
+            function evaluateState(state) {
+                let totalOverlap = 0;
+                for (let i = 0; i < NUM_SC; i++) {
+                    for (let j = i + 1; j < NUM_SC; j++) {
+                        totalOverlap += computeOverlap(state[i], state[j]);
+                    }
+                }
+                const mec = computeMEC(state);
+                const score = mec.radius + totalOverlap * 100.0;
+                return { score, mec, totalOverlap };
+            }
+
+            // Worker state
+            let workerId = 0;
+            let temp = 0.01;
+            let stepSizePos = 0.05;
+            let stepSizeAngle = 0.1;
+            let currentState = null;
+            let currentEval = null;
+            let acceptedCount = 0;
+            let totalSteps = 0;
+
+            self.onmessage = function(e) {
+                const msg = e.data;
+                if (msg.cmd === 'init') {
+                    workerId = msg.id;
+                    temp = msg.temp;
+                    currentState = JSON.parse(JSON.stringify(msg.state));
+                    currentEval = evaluateState(currentState);
+                } else if (msg.cmd === 'step') {
+                    const steps = msg.count || 50;
+                    for (let s = 0; s < steps; s++) {
+                        totalSteps++;
+                        // Pick random shape to perturb
+                        const idx = Math.floor(Math.random() * NUM_SC);
+                        const orig = { ...currentState[idx] };
+
+                        // Gaussian perturbation
+                        const u1 = Math.random(), u2 = Math.random();
+                        const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+                        const z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2);
+
+                        currentState[idx].x += z0 * stepSizePos;
+                        currentState[idx].y += z1 * stepSizePos;
+                        currentState[idx].theta += (Math.random() - 0.5) * stepSizeAngle;
+
+                        const newEval = evaluateState(currentState);
+                        const delta = newEval.score - currentEval.score;
+
+                        // Metropolis-Hastings criterion
+                        if (delta < 0 || Math.random() < Math.exp(-delta / temp)) {
+                            currentEval = newEval;
+                            acceptedCount++;
+                        } else {
+                            // Revert
+                            currentState[idx] = orig;
+                        }
+                    }
+
+                    // Adapt step size to target 0.234 acceptance rate
+                    const accRate = acceptedCount / steps;
+                    acceptedCount = 0;
+                    if (accRate > 0.234) {
+                        stepSizePos *= 1.05;
+                        stepSizeAngle *= 1.05;
+                    } else {
+                        stepSizePos *= 0.95;
+                        stepSizeAngle *= 0.95;
+                    }
+
+                    self.postMessage({
+                        cmd: 'result',
+                        id: workerId,
+                        state: currentState,
+                        eval: currentEval,
+                        temp: temp,
+                        accRate: accRate
+                    });
+                } else if (msg.cmd === 'setState') {
+                    currentState = JSON.parse(JSON.stringify(msg.state));
+                    currentEval = evaluateState(currentState);
+                }
+            };
+        `;
+
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerBlobUrl = URL.createObjectURL(blob);
+
+        // --- MAIN THREAD CODE ---
+        const baselineState = [
+            { x: -2, y: 0, theta: 0 }, { x: -2, y: 0, theta: Math.PI },
+            { x: 0, y: 0, theta: 0 }, { x: 0, y: 0, theta: Math.PI },
+            { x: 2, y: 0, theta: 0 }, { x: 2, y: 0, theta: Math.PI },
+            { x: -2, y: 2, theta: 0 }, { x: -2, y: 2, theta: Math.PI },
+            { x: 0, y: 2, theta: 0 }, { x: 0, y: 2, theta: Math.PI },
+            { x: 2, y: 2, theta: 0 }, { x: 2, y: 2, theta: Math.PI },
+            { x: -2, y: 3, theta: Math.PI/2 },
+            { x: 0, y: 3, theta: Math.PI/2 },
+            { x: 2, y: 3, theta: Math.PI/2 }
+        ];
+
+        let globalBestState = JSON.parse(JSON.stringify(baselineState));
+        let globalBestScore = 3.50;
+        let isRunning = false;
+        let workers = [];
+        let workerStates = new Array(16);
+        let workerEvals = new Array(16);
+
+        // Initialize Swarm Grid UI
+        const swarmGrid = document.getElementById('swarmGrid');
+        const workerCanvases = [];
+        for (let i = 0; i < 16; i++) {
+            const card = document.createElement('div');
+            card.className = 'worker-card';
+            card.id = `workerCard_${i}`;
+            card.innerHTML = `
+                <div class="worker-label">WORKER ${i}</div>
+                <canvas class="worker-canvas" id="workerCanvas_${i}" width="65" height="65"></canvas>
+                <div class="worker-stat" id="workerStat_${i}">R=--</div>
+            `;
+            swarmGrid.appendChild(card);
+            workerCanvases.push(document.getElementById(`workerCanvas_${i}`));
+        }
+
+        const mainCanvas = document.getElementById('mainCanvas');
+        const mainCtx = mainCanvas.getContext('2d');
+
+        function log(msg, type='') {
+            const logPanel = document.getElementById('logTerminal');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logPanel.appendChild(entry);
+            logPanel.scrollTop = logPanel.scrollHeight;
+        }
+
+        // Render function for semicircles
+        function drawPacking(ctx, width, height, state, mec, highlightColor='#00ffcc') {
+            ctx.clearRect(0, 0, width, height);
+
+            if (!mec) return;
+
+            // Coordinate mapping (fit MEC inside canvas)
+            const margin = 1.3;
+            const scale = (width / 2) / (mec.radius * margin);
+            const offsetX = width / 2 - mec.cx * scale;
+            const offsetY = height / 2 + mec.cy * scale; // Flip Y for Cartesian
+
+            // Draw MEC
+            ctx.beginPath();
+            ctx.arc(offsetX + mec.cx * scale, offsetY - mec.cy * scale, mec.radius * scale, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#ff3366';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw Semicircles
+            for (let sc of state) {
+                const sx = offsetX + sc.x * scale;
+                const sy = offsetY - sc.y * scale;
+
+                ctx.save();
+                ctx.translate(sx, sy);
+                ctx.rotate(-sc.theta);
+
+                ctx.beginPath();
+                ctx.arc(0, 0, scale, -Math.PI/2, Math.PI/2);
+                ctx.closePath();
+
+                ctx.fillStyle = highlightColor + '22';
+                ctx.fill();
+                ctx.strokeStyle = highlightColor;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        // Initialize 16 Workers
+        function initWorkers() {
+            for (let i = 0; i < 16; i++) {
+                if (workers[i]) workers[i].terminate();
+
+                const temp = 0.0001 * Math.pow(0.5 / 0.0001, i / 15); // Geometric temperature spread
+                const worker = new Worker(workerBlobUrl);
+
+                worker.postMessage({
+                    cmd: 'init',
+                    id: i,
+                    temp: temp,
+                    state: globalBestState
+                });
+
+                worker.onmessage = function(e) {
+                    if (e.data.cmd === 'result') {
+                        const { id, state, eval: evalRes } = e.data;
+                        workerStates[id] = state;
+                        workerEvals[id] = evalRes;
+
+                        // Draw worker thumbnail
+                        const wCtx = workerCanvases[id].getContext('2d');
+                        drawPacking(wCtx, 65, 65, state, evalRes.mec, id === 0 ? '#00ffcc' : '#888899');
+                        document.getElementById(`workerStat_${id}`).textContent = `R=${evalRes.mec.radius.toFixed(3)}`;
+
+                        // Update global best
+                        if (evalRes.totalOverlap === 0 && evalRes.mec.radius < globalBestScore) {
+                            globalBestScore = evalRes.mec.radius;
+                            globalBestState = JSON.parse(JSON.stringify(state));
+
+                            document.getElementById('bestRadius').textContent = globalBestScore.toFixed(6);
+                            document.getElementById('overlapStatus').textContent = '0';
+                            log(`[NEW BEST] Worker ${id} found new best radius: ${globalBestScore.toFixed(6)}!`, 'best');
+
+                            // Highlight best worker card
+                            document.querySelectorAll('.worker-card').forEach(c => c.classList.remove('best-worker'));
+                            document.getElementById(`workerCard_${id}`).classList.add('best-worker');
+
+                            drawPacking(mainCtx, 550, 550, globalBestState, evalRes.mec);
+                        }
+
+                        // Continue stepping worker if swarm is active
+                        if (isRunning) {
+                            worker.postMessage({ cmd: 'step', count: 50 });
+                        }
+                    }
+                };
+
+                workers[i] = worker;
+            }
+        }
+
+        // Button Controls
+        document.getElementById('btnToggle').onclick = function() {
+            isRunning = !isRunning;
+            const btn = document.getElementById('btnToggle');
+            const badge = document.getElementById('statusBadge');
+
+            if (isRunning) {
+                btn.textContent = 'PAUSE SWARM';
+                badge.textContent = 'SWARM ACTIVE';
+                badge.classList.add('active');
+                log('[SWARM] Swarm started across 16 Web Workers.');
+
+                if (workers.length === 0) initWorkers();
+                workers.forEach(w => w.postMessage({ cmd: 'step', count: 50 }));
+            } else {
+                btn.textContent = 'START SWARM (16 WORKERS)';
+                badge.textContent = 'SWARM PAUSED';
+                badge.classList.remove('active');
+                log('[SWARM] Swarm paused.');
+            }
+        };
+
+        document.getElementById('btnRandom').onclick = function() {
+            log('[ACTION] Generating random starting seed...');
+            const randomState = [];
+            for (let i = 0; i < 15; i++) {
+                randomState.push({
+                    x: (Math.random() - 0.5) * 3.0,
+                    y: (Math.random() - 0.5) * 3.0,
+                    theta: Math.random() * 2 * Math.PI
+                });
+            }
+            globalBestState = randomState;
+            globalBestScore = 99.0;
+            initWorkers();
+            if (isRunning) workers.forEach(w => w.postMessage({ cmd: 'step', count: 50 }));
+        };
+
+        document.getElementById('btnReset').onclick = function() {
+            log('[ACTION] Resetting to baseline configuration (R=3.500000).');
+            globalBestState = JSON.parse(JSON.stringify(baselineState));
+            globalBestScore = 3.50;
+            document.getElementById('bestRadius').textContent = '3.500000';
+            initWorkers();
+            drawPacking(mainCtx, 550, 550, globalBestState, { cx: 0, cy: 1.5, radius: 3.5 });
+        };
+
+        document.getElementById('btnExport').onclick = function() {
+            const jsonStr = JSON.stringify(globalBestState, null, 2);
+            navigator.clipboard.writeText(jsonStr).then(() => {
+                log('[EXPORT] Solution JSON copied to clipboard!');
+            });
+        };
+
+        // Initial draw of baseline
+        initWorkers();
+        drawPacking(mainCtx, 550, 550, baselineState, { cx: 0, cy: 1.5, radius: 3.5 });
+    </script>
+</body>
+</html>
