@@ -1,22 +1,13 @@
 use host::display;
 
 pub fn frame(t: i32) {
-    let w = display::width();
-    let h = display::height();
-    display::clear(0xffffff);
-
-    // Outer eye outline
-    let cx = w / 2;
-    let cy = h / 2;
-    let r = w / 2 - 4;
-
-    display::fill_rect(2, 2, w - 4, h - 4, 0xeeeeee);
-
-    // Pupil movement
-    let offset_x = ((t / 10) % 20) - 10;
-    let pupil_r = 16;
-    display::fill_rect(cx + offset_x - pupil_r, cy - pupil_r, pupil_r * 2, pupil_r * 2, 0x2244aa);
-    display::fill_rect(cx + offset_x - 6, cy - 6, 12, 12, 0x000000);
-
+    display::clear(0x000022);
+    let open_h = 80 + (host::math::sin(t / 5) * 60) / 256;
+    display::fill_rect(150, 256 - open_h / 2, 212, open_h, 0x3388ff);
+    display::fill_rect(226, 226, 60, 60, 0xffffff);
+    let label = [69, 89, 69];
+    for i in 0..3 {
+        display::draw_char(234 + i * 14, 420, label[i], 0xffffff, 2);
+    }
     display::present();
 }
