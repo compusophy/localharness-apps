@@ -1,16 +1,12 @@
 use host::display;
 
 pub fn frame(t: i32) {
-    let w = display::width();
-    let h = display::height();
-    display::clear(0xffffff);
-
-    // Smiling / animated mouth
-    let open_amount = ((t / 15) % 30);
-
-    display::fill_rect(10, 10, w - 20, 20 + open_amount, 0xbb2222);
-    // Teeth
-    display::fill_rect(20, 10, w - 40, 10, 0xffffff);
-
+    display::clear(0x002200);
+    let h = 20 + (host::math::sin(t / 3) * 40) / 256;
+    display::fill_rect(150, 256 - h / 2, 212, h, 0x33ff33);
+    let label = [77, 79, 85, 84, 72];
+    for i in 0..5 {
+        display::draw_char(220 + i * 14, 420, label[i], 0xffffff, 2);
+    }
     display::present();
 }
