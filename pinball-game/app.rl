@@ -12,26 +12,28 @@ use host::math;
 // 7: state (0: ready in plunger, 1: launched/in-play, 2: game over)
 // 8: left_flipper (0 down, 1 up)
 // 9: right_flipper (0 down, 1 up)
-// 10: bumper1_flash (timer)
-// 11: bumper2_flash (timer)
-// 12: bumper3_flash (timer)
+// 10: bumper1_flash
+// 11: bumper2_flash
+// 12: bumper3_flash
 // 13: plunger_power
 // 14: high_score
-// 15: drop_target1 (1 active, 0 hit)
-// 16: drop_target2 (1 active, 0 hit)
-// 17: drop_target3 (1 active, 0 hit)
-// 18: spinner_angle (0..255)
+// 15: drop_target1
+// 16: drop_target2
+// 17: drop_target3
+// 18: spinner_angle
 // 19: spinner_speed
-// 20: rollover_l (0/1)
-// 21: rollover_m (0/1)
-// 22: rollover_r (0/1)
-// 23: multiplier (1..5)
-// 24: one_way_gate_passed (1 when entered table)
+// 20: rollover_l
+// 21: rollover_m
+// 22: rollover_r
+// 23: multiplier
+// 24: gate_passed
+// 25: left_flipper_prev
+// 26: right_flipper_prev
 
 fn init_game() {
     display::state_set(0, 1);
     display::state_set(1, 46000);
-    display::state_set(2, 44000);
+    display::state_set(2, 43000);
     display::state_set(3, 0);
     display::state_set(4, 0);
     display::state_set(5, 0);
@@ -53,11 +55,13 @@ fn init_game() {
     display::state_set(22, 0);
     display::state_set(23, 1);
     display::state_set(24, 0);
+    display::state_set(25, 0);
+    display::state_set(26, 0);
 }
 
 fn reset_ball() {
     display::state_set(1, 46000);
-    display::state_set(2, 44000);
+    display::state_set(2, 43000);
     display::state_set(3, 0);
     display::state_set(4, 0);
     display::state_set(7, 0);
@@ -109,6 +113,9 @@ pub fn frame(t: i32) {
     let mut mult = display::state_get(23);
     let mut gate_passed = display::state_get(24);
 
+    let lf_prev = display::state_get(25);
+    let rf_prev = display::state_get(26);
+
     let px = display::pointer_x();
     let py = display::pointer_y();
     let p_down = display::pointer_down();
@@ -119,7 +126,7 @@ pub fn frame(t: i32) {
         s_speed = s_speed - 1;
     }
 
-    // Input Handling
+    // Input Handling: Screen is split: Left half = Left Flipper, Right half = Right Flipper, Plunger zone = Bottom Right
     if p_down != 0 {
         if gstate == 2 {
             init_game();
@@ -128,22 +135,20 @@ pub fn frame(t: i32) {
             balls = 3;
             mult = 1;
         } else if gstate == 0 {
-            if px >= 435 && py >= 320 {
-                plunger = plunger + 28;
-                if plunger > 950 {
-                    plunger = 950;
-                }
+            if px >= 420 && py >= 300 {
+                plunger = plunger + 32;
+                if plunger > 950 { plunger = 950; }
             } else {
-                if px < 240 { lf = 1; } else { rf = 1; }
+                if px < 256 { lf = 1; } else { rf = 1; }
             }
         } else {
-            if px < 240 { lf = 1; } else { rf = 1; }
+            if px < 256 { lf = 1; } else { rf = 1; }
         }
     } else {
-        if gstate == 0 && plunger > 80 {
-            // Launch ball with strong upward thrust & slight left push
-            bvy = -1600 - (plunger * 2);
-            bvx = -50;
+        if gstate == 0 && plunger > 60 {
+            // Launch ball up right plunger chute
+            bvy = -1800 - (plunger * 2);
+            bvx = -40;
             gstate = 1;
             plunger = 0;
         } else {
@@ -154,16 +159,23 @@ pub fn frame(t: i32) {
     display::state_set(8, lf);
     display::state_set(9, rf);
 
+    // Dynamic Flipper swing detection (flips up this frame = high angular velocity)
+    let lf_swinging = if lf == 1 && lf_prev == 0 { 1 } else { 0 };
+    let rf_swinging = if rf == 1 && rf_prev == 0 { 1 } else { 0 };
+
+    display::state_set(25, lf);
+    display::state_set(26, rf);
+
     // Physics Engine
     if gstate == 1 {
-        // Gravity & Terminal Velocity
+        // Gravity
         bvy = bvy + 18;
         if bvy > 1400 { bvy = 1400; }
         if bvx > 1400 { bvx = 1400; }
         if bvx < -1400 { bvx = -1400; }
 
-        // Slight rolling resistance
-        bvx = (bvx * 997) / 1000;
+        // Air damping
+        bvx = (bvx * 996) / 1000;
 
         bx = bx + bvx;
         by = by + bvy;
@@ -172,34 +184,30 @@ pub fn frame(t: i32) {
         let cur_y = by / 100;
 
         // Plunger Launch & Top Arch Guide
-        // Ball launches up right channel (x: 440..475)
         if cur_y < 120 && cur_x > 380 {
-            // Top curved deflector forces ball smoothly left into upper playfield
             let def_dist = (cur_x - 380) + (120 - cur_y);
-            if def_dist > 45 {
-                bvx = -450;
-                bvy = 180;
+            if def_dist > 40 {
+                bvx = -550;
+                bvy = 220;
                 bx = 370 * 100;
                 gate_passed = 1;
             }
         }
 
-        // One-Way Gate: once ball has left plunger lane and is in main playfield,
-        // it cannot re-enter the plunger lane at the top right
+        // One-Way Gate: ball can't fall back down plunger chute
         if gate_passed == 1 {
             if cur_x >= 436 && cur_y > 110 && cur_y < 480 {
                 bx = 432 * 100;
-                bvx = -bvx * 8 / 10 - 50;
+                bvx = -bvx * 8 / 10 - 60;
             }
         } else {
-            // Separator wall between playfield and plunger lane
             if cur_x <= 440 && cur_x >= 434 && cur_y > 130 && cur_y < 480 {
                 bx = 444 * 100;
                 bvx = 50;
             }
         }
 
-        // Top Outer Arc (Smooth curved ceiling from x: 50 to x: 440, top: y: 45)
+        // Top Outer Arc
         if cur_y < 50 {
             by = 52 * 100;
             bvy = 250;
@@ -227,21 +235,17 @@ pub fn frame(t: i32) {
             }
         }
 
-        // Rollover Lanes (Top: L: 140..170, M: 225..255, R: 310..340 at y: 70..85)
+        // Rollover Lanes
         if cur_y >= 70 && cur_y <= 85 {
             if cur_x >= 140 && cur_x <= 170 && ro_l == 0 {
-                ro_l = 1;
-                score = score + (250 * mult);
+                ro_l = 1; score = score + (250 * mult);
             }
             if cur_x >= 225 && cur_x <= 255 && ro_m == 0 {
-                ro_m = 1;
-                score = score + (250 * mult);
+                ro_m = 1; score = score + (250 * mult);
             }
             if cur_x >= 310 && cur_x <= 340 && ro_r == 0 {
-                ro_r = 1;
-                score = score + (250 * mult);
+                ro_r = 1; score = score + (250 * mult);
             }
-            // Check all rollovers completed -> increase multiplier!
             if ro_l == 1 && ro_m == 1 && ro_r == 1 {
                 mult = mult + 1;
                 if mult > 5 { mult = 5; }
@@ -250,136 +254,169 @@ pub fn frame(t: i32) {
             }
         }
 
-        // Drop Targets on Left (x: 65, y: 180, 205, 230)
-        if cur_x >= 60 && cur_x <= 80 {
+        // Drop Targets on Left
+        if cur_x >= 56 && cur_x <= 78 {
             if dt1 == 1 && cur_y >= 175 && cur_y <= 195 {
-                dt1 = 0;
-                score = score + (500 * mult);
-                bvx = 450;
+                dt1 = 0; score = score + (500 * mult); bvx = 450;
             }
             if dt2 == 1 && cur_y >= 200 && cur_y <= 220 {
-                dt2 = 0;
-                score = score + (500 * mult);
-                bvx = 450;
+                dt2 = 0; score = score + (500 * mult); bvx = 450;
             }
             if dt3 == 1 && cur_y >= 225 && cur_y <= 245 {
-                dt3 = 0;
-                score = score + (500 * mult);
-                bvx = 450;
+                dt3 = 0; score = score + (500 * mult); bvx = 450;
             }
             if dt1 == 0 && dt2 == 0 && dt3 == 0 {
-                // Reset drop targets bank & award bonus
                 dt1 = 1; dt2 = 1; dt3 = 1;
                 score = score + (3000 * mult);
             }
         }
 
-        // Spinner Lane (x: 375, y: 200..230)
+        // Spinner Lane
         if cur_x >= 365 && cur_x <= 390 && cur_y >= 200 && cur_y <= 230 {
             s_speed = s_speed + 15;
             if s_speed > 60 { s_speed = 60; }
             score = score + (50 * mult);
         }
 
-        // Active Bumper 1 (x: 175, y: 160, r: 22)
+        // Active Bumpers
         let dx1 = cur_x - 175;
         let dy1 = cur_y - 160;
-        let dist1_sq = dx1 * dx1 + dy1 * dy1;
-        if dist1_sq <= 28 * 28 {
-            b1_hit = 12;
-            score = score + (300 * mult);
-            bvx = dx1 * 32;
-            bvy = dy1 * 32;
+        if dx1 * dx1 + dy1 * dy1 <= 28 * 28 {
+            b1_hit = 12; score = score + (300 * mult);
+            bvx = dx1 * 32; bvy = dy1 * 32;
         }
 
-        // Active Bumper 2 (x: 305, y: 160, r: 22)
         let dx2 = cur_x - 305;
         let dy2 = cur_y - 160;
-        let dist2_sq = dx2 * dx2 + dy2 * dy2;
-        if dist2_sq <= 28 * 28 {
-            b2_hit = 12;
-            score = score + (300 * mult);
-            bvx = dx2 * 32;
-            bvy = dy2 * 32;
+        if dx2 * dx2 + dy2 * dy2 <= 28 * 28 {
+            b2_hit = 12; score = score + (300 * mult);
+            bvx = dx2 * 32; bvy = dy2 * 32;
         }
 
-        // Active Bumper 3 (x: 240, y: 240, r: 26)
         let dx3 = cur_x - 240;
         let dy3 = cur_y - 240;
-        let dist3_sq = dx3 * dx3 + dy3 * dy3;
-        if dist3_sq <= 32 * 32 {
-            b3_hit = 12;
-            score = score + (500 * mult);
-            bvx = dx3 * 28;
-            bvy = dy3 * 28;
+        if dx3 * dx3 + dy3 * dy3 <= 32 * 32 {
+            b3_hit = 12; score = score + (500 * mult);
+            bvx = dx3 * 28; bvy = dy3 * 28;
         }
 
-        // Left Slingshot Kicker (triangle: (85, 330) -> (135, 395) -> (85, 395))
+        // Slingshots
         if cur_x >= 85 && cur_x <= 140 && cur_y >= 330 && cur_y <= 395 {
             if cur_x - 85 < (cur_y - 330) * 50 / 65 {
-                bvx = 550;
-                bvy = -450;
-                score = score + (150 * mult);
+                bvx = 550; bvy = -450; score = score + (150 * mult);
             }
         }
-
-        // Right Slingshot Kicker (triangle: (395, 330) -> (345, 395) -> (395, 395))
         if cur_x >= 340 && cur_x <= 395 && cur_y >= 330 && cur_y <= 395 {
             if 395 - cur_x < (cur_y - 330) * 50 / 65 {
-                bvx = -550;
-                bvy = -450;
-                score = score + (150 * mult);
+                bvx = -550; bvy = -450; score = score + (150 * mult);
             }
         }
 
-        // Left Inlane / Outlane Dividers
+        // Inlane / Outlane Dividers
         if cur_x >= 78 && cur_x <= 84 && cur_y >= 380 && cur_y <= 450 {
-            bvx = -bvx;
-            bx = 76 * 100;
+            bvx = -bvx; bx = 76 * 100;
         }
-        // Right Inlane / Outlane Dividers
         if cur_x >= 396 && cur_x <= 402 && cur_y >= 380 && cur_y <= 450 {
-            bvx = -bvx;
-            bx = 404 * 100;
+            bvx = -bvx; bx = 404 * 100;
         }
 
-        // Left Flipper collision
-        // Pivot: (130, 442) -> Tip: Down=(200, 466), Up=(195, 418)
-        let l_tip_y = if lf != 0 { 418 } else { 466 };
-        let l_tip_x = if lf != 0 { 195 } else { 200 };
-        if cur_x >= 125 && cur_x <= 208 && cur_y >= 412 && cur_y <= 472 {
-            let prog = (cur_x - 125) * 100 / 80;
-            let flip_surf_y = 442 + (l_tip_y - 442) * prog / 100;
-            if cur_y >= flip_surf_y - 12 && cur_y <= flip_surf_y + 12 {
-                if lf != 0 {
-                    bvy = -880;
-                    bvx = 220 + prog * 4;
-                    score = score + (100 * mult);
-                } else {
-                    bvy = -bvy * 5 / 10 - 150;
-                    bvx = bvx + 80;
-                }
-                by = (flip_surf_y - 14) * 100;
+        // Bottom guide ramps into flipper area
+        if cur_x >= 50 && cur_x <= 130 && cur_y >= 420 && cur_y <= 445 {
+            let guide_y = 430 + (cur_x - 50) * 12 / 80;
+            if cur_y >= guide_y - 10 && cur_y <= guide_y + 10 {
+                by = (guide_y - 10) * 100;
+                bvy = 120;
+                bvx = bvx + 80;
+            }
+        }
+        if cur_x >= 350 && cur_x <= 436 && cur_y >= 420 && cur_y <= 445 {
+            let guide_y = 442 - (cur_x - 350) * 12 / 86;
+            if cur_y >= guide_y - 10 && cur_y <= guide_y + 10 {
+                by = (guide_y - 10) * 100;
+                bvy = 120;
+                bvx = bvx - 80;
             }
         }
 
-        // Right Flipper collision
-        // Pivot: (350, 442) -> Tip: Down=(280, 466), Up=(285, 418)
-        let r_tip_y = if rf != 0 { 418 } else { 466 };
-        let r_tip_x = if rf != 0 { 285 } else { 280 };
-        if cur_x >= 272 && cur_x <= 355 && cur_y >= 412 && cur_y <= 472 {
-            let prog = (355 - cur_x) * 100 / 80;
-            let flip_surf_y = 442 + (r_tip_y - 442) * prog / 100;
-            if cur_y >= flip_surf_y - 12 && cur_y <= flip_surf_y + 12 {
-                if rf != 0 {
-                    bvy = -880;
-                    bvx = -(220 + prog * 4);
+        // ==================== ROBUST FLIPPER COLLISION ====================
+        // Left Flipper: Root (130, 442) -> Tip: Down=(205, 468), Up=(195, 415)
+        let l_tip_x = if lf != 0 { 195 } else { 205 };
+        let l_tip_y = if lf != 0 { 415 } else { 468 };
+
+        if cur_x >= 125 && cur_x <= 215 && cur_y >= 400 && cur_y <= 480 {
+            let seg_dx = l_tip_x - 130;
+            let seg_dy = l_tip_y - 442;
+            let p_dx = cur_x - 130;
+            let p_dy = cur_y - 442;
+
+            let dot = p_dx * seg_dx + p_dy * seg_dy;
+            let len_sq = seg_dx * seg_dx + seg_dy * seg_dy;
+
+            let mut t_prog = (dot * 100) / len_sq;
+            if t_prog < 0 { t_prog = 0; }
+            if t_prog > 100 { t_prog = 100; }
+
+            let closest_x = 130 + (seg_dx * t_prog) / 100;
+            let closest_y = 442 + (seg_dy * t_prog) / 100;
+
+            let dist_x = cur_x - closest_x;
+            let dist_y = cur_y - closest_y;
+            let dist_sq = dist_x * dist_x + dist_y * dist_y;
+
+            // Ball radius is 8, flipper half-thickness is 6 -> threshold ~14
+            if dist_sq <= 15 * 15 {
+                if lf != 0 || lf_swinging != 0 {
+                    // Upward flipper power scaled by tip distance
+                    let power = if lf_swinging != 0 { 1400 } else { 950 };
+                    bvy = -(power + (t_prog * 4));
+                    bvx = 250 + (t_prog * 5);
                     score = score + (100 * mult);
                 } else {
-                    bvy = -bvy * 5 / 10 - 150;
-                    bvx = bvx - 80;
+                    // Ball bouncing or rolling along down-flipper
+                    bvy = -bvy * 4 / 10 - 180;
+                    bvx = bvx + 100;
                 }
-                by = (flip_surf_y - 14) * 100;
+                by = (closest_y - 12) * 100;
+                bx = (closest_x + dist_x) * 100;
+            }
+        }
+
+        // Right Flipper: Root (350, 442) -> Tip: Down=(275, 468), Up=(285, 415)
+        let r_tip_x = if rf != 0 { 285 } else { 275 };
+        let r_tip_y = if rf != 0 { 415 } else { 468 };
+
+        if cur_x >= 265 && cur_x <= 355 && cur_y >= 400 && cur_y <= 480 {
+            let seg_dx = r_tip_x - 350;
+            let seg_dy = r_tip_y - 442;
+            let p_dx = cur_x - 350;
+            let p_dy = cur_y - 442;
+
+            let dot = p_dx * seg_dx + p_dy * seg_dy;
+            let len_sq = seg_dx * seg_dx + seg_dy * seg_dy;
+
+            let mut t_prog = (dot * 100) / len_sq;
+            if t_prog < 0 { t_prog = 0; }
+            if t_prog > 100 { t_prog = 100; }
+
+            let closest_x = 350 + (seg_dx * t_prog) / 100;
+            let closest_y = 442 + (seg_dy * t_prog) / 100;
+
+            let dist_x = cur_x - closest_x;
+            let dist_y = cur_y - closest_y;
+            let dist_sq = dist_x * dist_x + dist_y * dist_y;
+
+            if dist_sq <= 15 * 15 {
+                if rf != 0 || rf_swinging != 0 {
+                    let power = if rf_swinging != 0 { 1400 } else { 950 };
+                    bvy = -(power + (t_prog * 4));
+                    bvx = -(250 + (t_prog * 5));
+                    score = score + (100 * mult);
+                } else {
+                    bvy = -bvy * 4 / 10 - 180;
+                    bvx = bvx - 100;
+                }
+                by = (closest_y - 12) * 100;
+                bx = (closest_x + dist_x) * 100;
             }
         }
 
@@ -388,13 +425,11 @@ pub fn frame(t: i32) {
             balls = balls - 1;
             if balls <= 0 {
                 gstate = 2;
-                if score > hi_score {
-                    hi_score = score;
-                }
+                if score > hi_score { hi_score = score; }
             } else {
                 reset_ball();
                 bx = 46000;
-                by = 44000;
+                by = 43000;
                 bvx = 0;
                 bvy = 0;
                 gstate = 0;
@@ -431,19 +466,19 @@ pub fn frame(t: i32) {
     display::state_set(24, gate_passed);
 
     // ==================== RENDERING ====================
-    display::clear(0x0c0d14); // Ultra dark midnight cabinet
+    display::clear(0x0c0d14);
 
-    // Playfield Wooden Texture / Cyber Art Grid
+    // Playfield bed
     display::fill_rect(44, 44, 432, 458, 0x141829);
-    
-    // Playfield decorative retro lines
+
+    // Decorative retro grid lines
     let mut grid_y = 60;
     while grid_y < 440 {
         display::fill_rect(50, grid_y, 385, 1, 0x1d2238);
         grid_y = grid_y + 35;
     }
 
-    // Outer Cabinet Rails (beveled chrome)
+    // Outer Cabinet Rails
     display::fill_rect(40, 40, 6, 465, 0x475569);
     display::fill_rect(474, 40, 6, 465, 0x475569);
     display::fill_rect(40, 40, 440, 6, 0x475569);
@@ -452,20 +487,19 @@ pub fn frame(t: i32) {
     display::draw_line(380, 40, 474, 120, 0x64748b);
     display::draw_line(370, 42, 474, 130, 0x334155);
 
-    // Top Left Angled Guide
+    // Top Left Guide
     display::fill_triangle(46, 46, 120, 46, 46, 120, 0x334155);
     display::draw_line(46, 120, 120, 46, 0x38bdf8);
 
-    // Plunger Lane Divider & One-way Gate
+    // Plunger Lane Divider & Spring Gate
     display::fill_rect(436, 125, 4, 355, 0x64748b);
-    // One-way spring gate indicator
     if gate_passed == 1 {
-        display::draw_line(436, 125, 468, 125, 0xef4444); // Closed gate
+        display::draw_line(436, 125, 468, 125, 0xef4444);
     } else {
-        display::draw_line(436, 125, 455, 95, 0x22c55e);  // Open gate
+        display::draw_line(436, 125, 455, 95, 0x22c55e);
     }
 
-    // Top Rollover Lanes & Dividers
+    // Rollover Lanes
     display::fill_rect(130, 60, 4, 30, 0x94a3b8);
     display::fill_rect(215, 60, 4, 30, 0x94a3b8);
     display::fill_rect(300, 60, 4, 30, 0x94a3b8);
@@ -478,7 +512,7 @@ pub fn frame(t: i32) {
     display::fill_rect(230, 75, 20, 6, ro_col_m);
     display::fill_rect(315, 75, 20, 6, ro_col_r);
 
-    // Drop Targets (Left bank)
+    // Drop Targets
     if dt1 == 1 { display::fill_rect(58, 178, 14, 18, 0x38bdf8); } else { display::fill_rect(58, 185, 14, 4, 0x1e293b); }
     if dt2 == 1 { display::fill_rect(58, 203, 14, 18, 0x38bdf8); } else { display::fill_rect(58, 210, 14, 4, 0x1e293b); }
     if dt3 == 1 { display::fill_rect(58, 228, 14, 18, 0x38bdf8); } else { display::fill_rect(58, 235, 14, 4, 0x1e293b); }
@@ -489,7 +523,7 @@ pub fn frame(t: i32) {
     let spin_offset = (math::sin(s_angle) * 8) / 256;
     display::fill_rect(372, 212 + spin_offset, 17, 4, 0xf43f5e);
 
-    // Bumpers (Bumper 1, 2, 3)
+    // Bumpers
     let b1_outer = if b1_hit > 0 { 0xffffff } else { 0xd946ef };
     let b2_outer = if b2_hit > 0 { 0xffffff } else { 0xd946ef };
     let b3_outer = if b3_hit > 0 { 0xffffff } else { 0x06b6d4 };
@@ -506,7 +540,7 @@ pub fn frame(t: i32) {
     draw_disk(240, 240, 18, 0x18182f);
     draw_disk(240, 240, 10, b3_outer);
 
-    // Slingshots (Left & Right Neon Kickers)
+    // Slingshots
     display::fill_triangle(85, 330, 135, 395, 85, 395, 0x10b981);
     display::draw_line(85, 330, 135, 395, 0xa7f3d0);
     draw_disk(135, 395, 4, 0xffffff);
@@ -522,26 +556,28 @@ pub fn frame(t: i32) {
     display::draw_line(436, 430, 350, 442, 0x64748b);
 
     // Flippers
-    let l_tip_y = if lf != 0 { 418 } else { 466 };
-    let l_tip_x = if lf != 0 { 195 } else { 200 };
-    let r_tip_y = if rf != 0 { 418 } else { 466 };
-    let r_tip_x = if rf != 0 { 285 } else { 280 };
+    let l_tip_x = if lf != 0 { 195 } else { 205 };
+    let l_tip_y = if lf != 0 { 415 } else { 468 };
+    let r_tip_x = if rf != 0 { 285 } else { 275 };
+    let r_tip_y = if rf != 0 { 415 } else { 468 };
 
     let flip_color = 0xf43f5e;
-    // Left Flipper
-    display::fill_triangle(130, 438, 130, 446, l_tip_x, l_tip_y, flip_color);
-    draw_disk(130, 442, 6, 0xffffff);
-    draw_disk(l_tip_x, l_tip_y, 4, flip_color);
+    // Left Flipper Body & Rubber
+    display::fill_triangle(130, 436, 130, 448, l_tip_x, l_tip_y, flip_color);
+    draw_disk(130, 442, 7, 0xffffff);
+    draw_disk(l_tip_x, l_tip_y, 5, 0xffffff);
+    display::draw_line(130, 436, l_tip_x, l_tip_y - 3, 0xffe4e6);
 
-    // Right Flipper
-    display::fill_triangle(350, 438, 350, 446, r_tip_x, r_tip_y, flip_color);
-    draw_disk(350, 442, 6, 0xffffff);
-    draw_disk(r_tip_x, r_tip_y, 4, flip_color);
+    // Right Flipper Body & Rubber
+    display::fill_triangle(350, 436, 350, 448, r_tip_x, r_tip_y, flip_color);
+    draw_disk(350, 442, 7, 0xffffff);
+    draw_disk(r_tip_x, r_tip_y, 5, 0xffffff);
+    display::draw_line(350, 436, r_tip_x, r_tip_y - 3, 0xffe4e6);
 
-    // Center Drain Gap
+    // Drain
     display::fill_rect(190, 495, 100, 15, 0x000000);
 
-    // Plunger & Spring Animation
+    // Plunger
     if gstate == 0 {
         let p_offset = plunger / 18;
         display::fill_rect(450, 455 + p_offset, 20, 30, 0xf97316);
@@ -552,85 +588,78 @@ pub fn frame(t: i32) {
         }
     }
 
-    // Ball (Metallic with highlight)
+    // Ball
     let ball_draw_x = bx / 100;
     let ball_draw_y = by / 100;
     draw_disk(ball_draw_x, ball_draw_y, 8, 0xe2e8f0);
     draw_disk(ball_draw_x - 2, ball_draw_y - 2, 3, 0xffffff);
 
-    // Top Header & HUD Dashboard
+    // HUD
     display::fill_rect(0, 0, 512, 38, 0x090a0f);
-    
-    // Score
-    display::draw_char(14, 13, 83, 0x38bdf8, 1); // 'S'
-    display::draw_char(22, 13, 67, 0x38bdf8, 1); // 'C'
-    display::draw_char(30, 13, 79, 0x38bdf8, 1); // 'O'
-    display::draw_char(38, 13, 82, 0x38bdf8, 1); // 'R'
-    display::draw_char(46, 13, 69, 0x38bdf8, 1); // 'E'
+    display::draw_char(14, 13, 83, 0x38bdf8, 1);
+    display::draw_char(22, 13, 67, 0x38bdf8, 1);
+    display::draw_char(30, 13, 79, 0x38bdf8, 1);
+    display::draw_char(38, 13, 82, 0x38bdf8, 1);
+    display::draw_char(46, 13, 69, 0x38bdf8, 1);
     display::draw_number(58, 10, score, 0xffffff, 2);
 
-    // Multiplier Badge
     if mult > 1 {
         display::fill_rect(205, 8, 38, 22, 0x7c3aed);
         display::draw_number(212, 11, mult, 0xfacc15, 2);
-        display::draw_char(228, 11, 88, 0xfacc15, 2); // 'X'
+        display::draw_char(228, 11, 88, 0xfacc15, 2);
     }
 
-    // Balls Left
-    display::draw_char(340, 13, 66, 0xf472b6, 1); // 'B'
-    display::draw_char(348, 13, 65, 0xf472b6, 1); // 'A'
-    display::draw_char(356, 13, 76, 0xf472b6, 1); // 'L'
-    display::draw_char(364, 13, 76, 0xf472b6, 1); // 'L'
-    display::draw_char(372, 13, 83, 0xf472b6, 1); // 'S'
+    display::draw_char(340, 13, 66, 0xf472b6, 1);
+    display::draw_char(348, 13, 65, 0xf472b6, 1);
+    display::draw_char(356, 13, 76, 0xf472b6, 1);
+    display::draw_char(364, 13, 76, 0xf472b6, 1);
+    display::draw_char(372, 13, 83, 0xf472b6, 1);
     display::draw_number(390, 10, balls, 0xffffff, 2);
 
-    // High Score Display
-    display::draw_char(430, 13, 72, 0x94a3b8, 1); // 'H'
-    display::draw_char(438, 13, 73, 0x94a3b8, 1); // 'I'
+    display::draw_char(430, 13, 72, 0x94a3b8, 1);
+    display::draw_char(438, 13, 73, 0x94a3b8, 1);
     display::draw_number(450, 11, hi_score, 0xfacc15, 1);
 
-    // In-game instructions & prompts
+    // Overlays & Prompts
     if gstate == 0 {
-        // Plunger Arrow / Instruction
-        display::draw_char(446, 310, 80, 0xf97316, 1); // 'P'
-        display::draw_char(454, 310, 85, 0xf97316, 1); // 'U'
-        display::draw_char(462, 310, 76, 0xf97316, 1); // 'L'
-        display::draw_char(470, 310, 76, 0xf97316, 1); // 'L'
+        display::draw_char(446, 310, 80, 0xf97316, 1);
+        display::draw_char(454, 310, 85, 0xf97316, 1);
+        display::draw_char(462, 310, 76, 0xf97316, 1);
+        display::draw_char(470, 310, 76, 0xf97316, 1);
 
-        // Flipper controls hints
         display::fill_rect(90, 280, 85, 24, 0x1e293b);
-        display::draw_char(100, 286, 76, 0x22c55e, 1); // 'L'
-        display::draw_char(108, 286, 69, 0x22c55e, 1); // 'E'
-        display::draw_char(116, 286, 70, 0x22c55e, 1); // 'F'
-        display::draw_char(124, 286, 84, 0x22c55e, 1); // 'T'
+        display::draw_char(100, 286, 76, 0x22c55e, 1);
+        display::draw_char(108, 286, 69, 0x22c55e, 1);
+        display::draw_char(116, 286, 70, 0x22c55e, 1);
+        display::draw_char(124, 286, 84, 0x22c55e, 1);
 
         display::fill_rect(265, 280, 95, 24, 0x1e293b);
-        display::draw_char(275, 286, 82, 0x22c55e, 1); // 'R'
-        display::draw_char(283, 286, 73, 0x22c55e, 1); // 'I'
-        display::draw_char(291, 286, 71, 0x22c55e, 1); // 'G'
-        display::draw_char(299, 286, 72, 0x22c55e, 1); // 'H'
-        display::draw_char(307, 286, 84, 0x22c55e, 1); // 'T'
+        display::draw_char(275, 286, 82, 0x22c55e, 1);
+        display::draw_char(283, 286, 73, 0x22c55e, 1);
+        display::draw_char(291, 286, 71, 0x22c55e, 1);
+        display::draw_char(299, 286, 72, 0x22c55e, 1);
+        display::draw_char(307, 286, 84, 0x22c55e, 1);
     } else if gstate == 2 {
         display::fill_rect(90, 200, 320, 110, 0x000000);
         display::fill_rect(95, 205, 310, 100, 0x18182f);
-        display::draw_char(150, 220, 71, 0xef4444, 2); // 'G'
-        display::draw_char(166, 220, 65, 0xef4444, 2); // 'A'
-        display::draw_char(182, 220, 77, 0xef4444, 2); // 'M'
-        display::draw_char(198, 220, 69, 0xef4444, 2); // 'E'
-        display::draw_char(226, 220, 79, 0xef4444, 2); // 'O'
-        display::draw_char(242, 220, 86, 0xef4444, 2); // 'V'
-        display::draw_char(258, 220, 69, 0xef4444, 2); // 'E'
-        display::draw_char(274, 220, 82, 0xef4444, 2); // 'R'
+        display::draw_char(150, 220, 71, 0xef4444, 2);
+        display::draw_char(166, 220, 65, 0xef4444, 2);
+        display::draw_char(182, 220, 77, 0xef4444, 2);
+        display::draw_char(198, 220, 69, 0xef4444, 2);
+        display::draw_char(226, 220, 79, 0xef4444, 2);
+        display::draw_char(242, 220, 86, 0xef4444, 2);
+        display::draw_char(258, 220, 69, 0xef4444, 2);
+        display::draw_char(274, 220, 82, 0xef4444, 2);
 
-        display::draw_char(140, 265, 84, 0xfacc15, 1); // 'T'
-        display::draw_char(148, 265, 65, 0xfacc15, 1); // 'A'
-        display::draw_char(156, 265, 80, 0xfacc15, 1); // 'P'
-        display::draw_char(168, 265, 84, 0xfacc15, 1); // 'T'
-        display::draw_char(176, 265, 79, 0xfacc15, 1); // 'O'
-        display::draw_char(188, 265, 80, 0xfacc15, 1); // 'P'
-        display::draw_char(196, 265, 76, 0xfacc15, 1); // 'L'
-        display::draw_char(204, 265, 65, 0xfacc15, 1); // 'A'
-        display::draw_char(212, 265, 89, 0xfacc15, 1); // 'Y'
+        display::draw_char(140, 265, 84, 0xfacc15, 1);
+        display::draw_char(148, 265, 65, 0xfacc15, 1);
+        display::draw_char(156, 265, 80, 0xfacc15, 1);
+        display::draw_char(168, 265, 84, 0xfacc15, 1);
+        display::draw_char(176, 265, 79, 0xfacc15, 1);
+        display::draw_char(188, 265, 80, 0xfacc15, 1);
+        display::draw_char(196, 265, 76, 0xfacc15, 1);
+        display::draw_char(204, 265, 65, 0xfacc15, 1);
+        display::draw_char(212, 265, 89, 0xfacc15, 1);
     }
 
     display::present();
